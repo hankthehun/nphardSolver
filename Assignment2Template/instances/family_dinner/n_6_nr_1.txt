@@ -1,0 +1,10 @@
+6 6
+Alice Bob Carol David Erin Frank
+Alice Carol
+Alice Frank
+Bob Erin
+Carol Erin
+Carol Frank
+David Frank
+
+1
