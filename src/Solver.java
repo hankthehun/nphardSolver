@@ -1,4 +1,6 @@
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 // Copy the below class to each of the Part 2 WebLab exercises
 //    when submitting your solution.
@@ -13,7 +15,6 @@ import java.util.*;
 
 class Solver {
     static class Variable {
-        public List<Integer> domain;
         public Stack<TreeSet<Integer>> domainStack;
 
         /**
@@ -24,23 +25,32 @@ class Solver {
          * @param domain A list of integers, representing the domain of the variable.
          */
         public Variable(List<Integer> domain) {
-            // Variable initialization
-            this.domain = new ArrayList<>(domain);
             this.domainStack = new Stack<>();
             this.domainStack.push(new TreeSet<>(domain));
         }
-
 
         public void copy(){
             if(this.domainStack.isEmpty()) return;
             this.domainStack.push(new TreeSet<>(this.domainStack.peek()));
         }
 
-        public TreeSet<Integer> pop(){
-            return this.domainStack.pop();
+        public void assign(int value) {
+            domainStack.push(new TreeSet<>(List.of(value)));
+        }
+
+        public void pop(){
+            this.domainStack.pop();
         }
         public TreeSet<Integer> getCurrentDomain(){
             return this.domainStack.peek();
+        }
+
+        public boolean isDomainValid(){
+            return !this.domainStack.isEmpty();
+        }
+
+        public int getAssignedValue(){
+            return this.getCurrentDomain().first();
         }
 
         /**
@@ -52,24 +62,25 @@ class Solver {
          * @return whether the domain is empty
          */
         public boolean clamp(int lower, int upper) {
-            this.domain.removeIf(x -> x < lower || x > upper);
-            return this.domain.isEmpty();
+            this.getCurrentDomain().removeIf(x -> x < lower || x > upper);
+            return this.getCurrentDomain().isEmpty();
         }
 
         /**
          * @return The highest value in the domain.
          */
         public int getUpperBound(){
-            if (this.domain.isEmpty())
+            if (this.getCurrentDomain().isEmpty())
                 return Integer.MIN_VALUE;
-            return this.domain.get(this.domain.size() - 1);
+            return this.getCurrentDomain().last();
         }
     }
 
     static abstract class Constraint {
-        public abstract boolean isValid(List<Variable> variables, List<Integer> assignment);
 
         public abstract boolean updateDomains(Variable variable);
+
+        public abstract boolean isRespected();
     }
 
     static class NotEqConstraint extends Constraint {
@@ -88,22 +99,28 @@ class Solver {
          * @param c An integer constant.
          */
         public NotEqConstraint(Variable x1, Variable x2, int c) {
-            // Variable initialization
             this.x1 = x1;
             this.x2 = x2;
             this.c = c;
         }
 
         @Override
-        public boolean isValid(List<Variable> variables, List<Integer> assignment) {
-            int index1 = variables.indexOf(x1);
-            int index2 = variables.indexOf(x2);
-            return assignment.get(index1) != assignment.get(index2) + c;
+        public boolean updateDomains(Variable variable) {
+            int check = variable.getAssignedValue();
+            if(x1 == variable){
+                x2.getCurrentDomain().remove(check - c);
+                return x2.isDomainValid();
+            }
+            else if(x2 == variable){
+                x1.getCurrentDomain().remove(check + c);
+                return x1.isDomainValid();
+            }
+            return true;
         }
 
         @Override
-        public boolean updateDomains(Variable variable) {
-            return false;
+        public boolean isRespected() {
+            return x1.getAssignedValue() != x2.getAssignedValue() + c;
         }
     }
 
@@ -119,26 +136,33 @@ class Solver {
          * @param xs An array of a variables that should be different.
          */
         public AllDiffConstraint(Variable[] xs) {
-            // Variable initialization
             this.xs = xs;
         }
 
         @Override
-        public boolean isValid(List<Variable> variables, List<Integer> assignment) {
-            Set<Integer> set = new HashSet<>();
-            for(Variable var : xs) {
-                int index = variables.indexOf(var);
-                if(set.contains(assignment.get(index))){
-                    return false;
+        public boolean updateDomains(Variable variable) {
+            Set<Variable> vars = new HashSet<>();
+            Collections.addAll(vars, xs);
+            Integer x = variable.getAssignedValue();
+
+            if(!vars.contains(variable))
+                return true;
+            for (Variable v: vars) {
+                if (v != variable){
+                    v.getCurrentDomain().remove(x);
+                    if(!v.isDomainValid())
+                        return false;
                 }
-                set.add(assignment.get(index));
             }
             return true;
         }
 
         @Override
-        public boolean updateDomains(Variable variable) {
-            return false;
+        public boolean isRespected() {
+            return Arrays.stream(xs)
+                    .map(Variable::getAssignedValue)
+                    .collect(Collectors.toSet())
+                    .size() == xs.length;
         }
     }
 
@@ -167,36 +191,40 @@ class Solver {
         }
 
         @Override
-        public boolean isValid(List<Variable> variables, List<Integer> assignment) {
-            int sum = 0;
-            for(int i = 0; i < amount; i++){
-                sum += ws[i] * assignment.get(variables.indexOf(xs[i]));
-            }
-            return sum >= c;
-        }
-
-        @Override
         public boolean updateDomains(Variable variable) {
-            for(int i = 0; i < xs.length; i++){
+            for(int i = 0; i < amount; i++){
                 if(xs[i] == variable) continue;
+                if(ws[i] == 0) continue;
 
                 int sum = 0;
-                for(int j = 0; j < xs.length; j++){
+                for(int j = 0; j < amount; j++){
                     if (j == i) continue;
                     sum += ws[j] * xs[j].getUpperBound();
                 }
-                int upperbound = (c - sum) / ws[i];
-                if (xs[i].clamp(Integer.MIN_VALUE, upperbound))
-                    return false;
+
+                if (ws[i] >= 0){
+                    int lowerBound = Math.ceilDiv(c - sum, ws[i]);
+                    if (xs[i].clamp(lowerBound, Integer.MAX_VALUE))
+                        return false;
+                }
+                else{
+                    int upperBound = Math.floorDiv(c - sum, ws[i]);
+                    if (xs[i].clamp(Integer.MIN_VALUE, upperBound))
+                        return false;
+                }
             }
             return true;
+        }
+
+        @Override
+        public boolean isRespected() {
+            return IntStream.range(0, amount).map(i -> ws[i] * xs[i].getAssignedValue()).sum() >= c;
         }
     }
 
     private final List<Constraint> constraints;
     private final List<Variable> variables;
     private final List<int[]> foundSolutions;
-    private Map<Variable, Integer> variableToIndex;
 
     /**
      * Constructs a Solver using a list of variables and constraints.
@@ -208,10 +236,6 @@ class Solver {
         this.variables = new ArrayList<>(List.of(variables));
         this.constraints = new ArrayList<>(List.of(constraints));
         this.foundSolutions = new LinkedList<>();
-        this.variableToIndex = new HashMap<>();
-        for(int i = 0; i<variables.length; i++){
-            variableToIndex.put(variables[i], i);
-        }
     }
 
     /**
@@ -258,18 +282,15 @@ class Solver {
      *    to the list `foundSolutions`.
      * You are allowed to change or even remove this method.
      *
-     * @param findAll True if all solutions must be found, false if only
-     *                    only one needs to be found.
+     * @param findAll True if all solutions must be found, false if only one needs to be found.
      */
     private void solve(boolean findAll) {
         solveBacktracking(0, findAll);
     }
 
-
-
     public boolean isValid(){
-        return variables.stream().noneMatch(v -> v.domainStack.peek().isEmpty());
-//        return constraints.stream().allMatch(c -> c.isValid(variables, currentAssignment));
+        return variables.stream().allMatch(Variable::isDomainValid) &&
+                constraints.stream().allMatch(Constraint::isRespected);
     }
 
     private void solveBacktracking(int n, boolean findAll){
@@ -287,66 +308,32 @@ class Solver {
         }
         else{
             Variable v = variables.get(n);
-            List<Integer> elementsToIterate = new ArrayList<>(v.domainStack.peek()); // Create a separate list to iterate
-            for (Integer x : elementsToIterate) {
-                v.domainStack.push(new TreeSet<>(List.of(x))); //Assign a value to this variable
-                updateDomains(n);
+            if(v.getCurrentDomain().size() == 1){
                 solveBacktracking(n+1, findAll);
-                v.domainStack.pop();
+                return;
             }
-//            for(int i = 0; i < variables.get(n).domain.size(); i++){
-//                currentAssignment.add(variables.get(n).domain.get(i));
-//                solveBacktracking(n+1, findAll);
-//                currentAssignment.remove(currentAssignment.size()-1);
-//            }
-        }
-    }
-    public void updateDomains(int n){
-        for(Constraint c: constraints){
-            if(c instanceof AllDiffConstraint) {
-                AllDiffConstraint constraint = (AllDiffConstraint) c;
-                Set<Variable> vars = new HashSet<>();
-                Collections.addAll(vars, constraint.xs);
-                for(Variable v: constraint.xs){
-                    v.copy();
+
+            List<Integer> elementsToIterate = new ArrayList<>(v.getCurrentDomain());
+            for (int x : elementsToIterate) {
+                v.assign(x);
+                for(Variable variable : variables){
+                    if(variable != v)
+                        variable.copy();
                 }
-                Integer x = variables.get(n).domainStack.peek().first();
-                if (vars.contains(variables.get(n))) {
-                    for (int i = 0; i < constraint.xs.length; i++) {
-                        int subjIndex = variableToIndex.get(constraint.xs[i]);
-                        if (subjIndex != n) {
-                            for(Integer num : constraint.xs[i].domainStack.peek()){
-                                if(num == x){
-                                    constraint.xs[i].getCurrentDomain().remove(x);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            else if(c instanceof NotEqConstraint){
-                NotEqConstraint constraint = (NotEqConstraint) c;
-                int check = variables.get(n).getCurrentDomain().first();
-                if(constraint.x1 == variables.get(n)){
-                    constraint.x2.copy();
-                    constraint.x2.getCurrentDomain().remove(check - constraint.c);
-                }
-                if(constraint.x2 == variables.get(n)){
-                    constraint.x1.copy();
-                    constraint.x1.getCurrentDomain().remove(check + constraint.c);
-                }
-            }
-            if (c instanceof IneqConstraint) {
-                IneqConstraint constraint = (IneqConstraint) c;
-                constraint.updateDomains(variables.get(n));
+
+                if (updateDomains(v))
+                    solveBacktracking(n+1, findAll);
+
+                variables.forEach(Variable::pop);
             }
         }
     }
 
-    // You are free to add any helper methods you might want to use within
-    //     the solver. Note, however, that you would not be allowed to call
-    //     them directly from within the `solveProblem`-method, since you
-    //     must copy your `solveProblem`-code from Part 1, which wouldn't
-    //     have these helper methods defined.
-
+    public boolean updateDomains(Variable variable){
+        for(Constraint c: constraints) {
+            if (!c.updateDomains(variable))
+                return false;
+        }
+        return true;
+    }
 }
