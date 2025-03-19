@@ -14,6 +14,7 @@ import java.util.*;
 class Solver {
     static class Variable {
         public List<Integer> domain;
+        public Stack<TreeSet<Integer>> domainStack;
 
         /**
          * Constructs a Variable with a specified domain.
@@ -25,6 +26,21 @@ class Solver {
         public Variable(List<Integer> domain) {
             // Variable initialization
             this.domain = new ArrayList<>(domain);
+            this.domainStack = new Stack<>();
+            this.domainStack.push(new TreeSet<>(domain));
+        }
+
+
+        public void copy(){
+            if(this.domainStack.isEmpty()) return;
+            this.domainStack.push(new TreeSet<>(this.domainStack.peek()));
+        }
+
+        public TreeSet<Integer> pop(){
+            return this.domainStack.pop();
+        }
+        public TreeSet<Integer> getCurrentDomain(){
+            return this.domainStack.peek();
         }
 
         /**
@@ -180,8 +196,7 @@ class Solver {
     private final List<Constraint> constraints;
     private final List<Variable> variables;
     private final List<int[]> foundSolutions;
-    public List<Integer> currentAssignment;
-    public Set<Integer>[] domains;
+    private Map<Variable, Integer> variableToIndex;
 
     /**
      * Constructs a Solver using a list of variables and constraints.
@@ -193,10 +208,9 @@ class Solver {
         this.variables = new ArrayList<>(List.of(variables));
         this.constraints = new ArrayList<>(List.of(constraints));
         this.foundSolutions = new LinkedList<>();
-        this.currentAssignment = new ArrayList<>();
-        domains = new Set[variables.length];
+        this.variableToIndex = new HashMap<>();
         for(int i = 0; i<variables.length; i++){
-            domains[i] = new HashSet<>(variables[i].domain);
+            variableToIndex.put(variables[i], i);
         }
     }
 
@@ -254,8 +268,8 @@ class Solver {
 
 
     public boolean isValid(){
-        return constraints.stream().allMatch(c -> c.isValid(variables, currentAssignment))
-                && variables.stream().noneMatch(x -> x.domain.isEmpty());
+        return variables.stream().noneMatch(v -> v.domainStack.peek().isEmpty());
+//        return constraints.stream().allMatch(c -> c.isValid(variables, currentAssignment));
     }
 
     private void solveBacktracking(int n, boolean findAll){
@@ -266,16 +280,19 @@ class Solver {
             if(isValid()){
                 int[] solution = new int[variables.size()];
                 for(int i = 0; i<variables.size(); i++){
-                    solution[i] = currentAssignment.get(i);
+                    solution[i] = variables.get(i).domainStack.peek().first();
                 }
                 foundSolutions.add(solution);
             }
         }
         else{
-            for(Integer x: domains[n]){
-                currentAssignment.add(x);
+            Variable v = variables.get(n);
+            List<Integer> elementsToIterate = new ArrayList<>(v.domainStack.peek()); // Create a separate list to iterate
+            for (Integer x : elementsToIterate) {
+                v.domainStack.push(new TreeSet<>(List.of(x))); //Assign a value to this variable
+                updateDomains(n);
                 solveBacktracking(n+1, findAll);
-                currentAssignment.remove(currentAssignment.size()-1);
+                v.domainStack.pop();
             }
 //            for(int i = 0; i < variables.get(n).domain.size(); i++){
 //                currentAssignment.add(variables.get(n).domain.get(i));
@@ -284,25 +301,46 @@ class Solver {
 //            }
         }
     }
-    public boolean updateDomains(int n){
-        for(Constraint c: constraints) {
-            if (c instanceof AllDiffConstraint) {
+    public void updateDomains(int n){
+        for(Constraint c: constraints){
+            if(c instanceof AllDiffConstraint) {
                 AllDiffConstraint constraint = (AllDiffConstraint) c;
                 Set<Variable> vars = new HashSet<>();
                 Collections.addAll(vars, constraint.xs);
+                for(Variable v: constraint.xs){
+                    v.copy();
+                }
+                Integer x = variables.get(n).domainStack.peek().first();
                 if (vars.contains(variables.get(n))) {
                     for (int i = 0; i < constraint.xs.length; i++) {
+                        int subjIndex = variableToIndex.get(constraint.xs[i]);
+                        if (subjIndex != n) {
+                            for(Integer num : constraint.xs[i].domainStack.peek()){
+                                if(num == x){
+                                    constraint.xs[i].getCurrentDomain().remove(x);
+                                }
+                            }
+                        }
                     }
                 }
             }
-
+            else if(c instanceof NotEqConstraint){
+                NotEqConstraint constraint = (NotEqConstraint) c;
+                int check = variables.get(n).getCurrentDomain().first();
+                if(constraint.x1 == variables.get(n)){
+                    constraint.x2.copy();
+                    constraint.x2.getCurrentDomain().remove(check - constraint.c);
+                }
+                if(constraint.x2 == variables.get(n)){
+                    constraint.x1.copy();
+                    constraint.x1.getCurrentDomain().remove(check + constraint.c);
+                }
+            }
             if (c instanceof IneqConstraint) {
                 IneqConstraint constraint = (IneqConstraint) c;
-                return constraint.updateDomains(variables.get(n));
+                constraint.updateDomains(variables.get(n));
             }
         }
-
-        return true;
     }
 
     // You are free to add any helper methods you might want to use within
