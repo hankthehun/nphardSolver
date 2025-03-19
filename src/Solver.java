@@ -146,7 +146,7 @@ class Solver {
         }
     }
 
-    static abstract class Constraint {
+    static abstract class Constraint implements Comparable<Constraint> {
 
         /**
          * Propagates the constraint over all the variables concerned based on the variable that was updated.
@@ -164,6 +164,33 @@ class Solver {
          * @return Whether the constraint is respected or not.
          */
         public abstract boolean isRespected();
+
+        /**
+         * Returns the amount of variables affected by this constraint.
+         *
+         * @return The amount of variables affected.
+         */
+        public abstract int getComplexity();
+
+        /**
+         * Comparator for constraints based on the complexity.
+         * This is used to propagate constraints that are more likely to cause conflicts first.
+         *
+         * @param o The object to be compared.
+         * @return The comparison between the complexities.
+         */
+        @Override
+        public int compareTo(Constraint o) {
+            return Integer.compare(o.getComplexity(), this.getComplexity());
+        }
+
+        /**
+         * Checks if the given variable is affected by this constraint.
+         *
+         * @param variable The variable to check.
+         * @return Whether this constraint affects the given variable.
+         */
+        public abstract boolean affects(Variable variable);
     }
 
     static class NotEqConstraint extends Constraint {
@@ -206,6 +233,16 @@ class Solver {
         @Override
         public boolean isRespected() {
             return x1.getAssignedValue() != x2.getAssignedValue() + c;
+        }
+
+        @Override
+        public int getComplexity() {
+            return 2;
+        }
+
+        @Override
+        public boolean affects(Variable variable) {
+            return variable == x1 || variable == x2;
         }
     }
 
@@ -251,6 +288,16 @@ class Solver {
                     .map(Variable::getAssignedValue)
                     .collect(Collectors.toSet())
                     .size() == xs.size();
+        }
+
+        @Override
+        public int getComplexity() {
+            return xs.size();
+        }
+
+        @Override
+        public boolean affects(Variable variable) {
+            return xs.contains(variable);
         }
     }
 
@@ -315,10 +362,25 @@ class Solver {
         public boolean isRespected() {
             return IntStream.range(0, amount).map(i -> ws[i] * xs[i].getAssignedValue()).sum() >= c;
         }
+
+        @Override
+        public int getComplexity() {
+            return xs.length;
+        }
+
+        @Override
+        public boolean affects(Variable variable) {
+            for(Variable v: xs)
+                if(v == variable)
+                    return true;
+            return false;
+        }
     }
 
     private final List<Constraint> constraints;
     private final List<Variable> variables;
+    private final List<Integer> sortedVariables;
+    private final Map<Variable, Long> occurrences;
     private final List<int[]> foundSolutions;
 
     /**
@@ -329,8 +391,18 @@ class Solver {
     public Solver(Variable[] variables, Constraint[] constraints) {
         // Initialize variables
         this.variables = new ArrayList<>(List.of(variables));
+        this.sortedVariables = IntStream.range(0, variables.length).boxed().collect(Collectors.toList());
+        this.occurrences = new HashMap<>();
         this.constraints = new ArrayList<>(List.of(constraints));
         this.foundSolutions = new LinkedList<>();
+
+        for(Variable v: variables){
+            occurrences.put(v, Arrays.stream(constraints).filter(c -> c.affects(v)).count());
+        }
+        this.constraints.sort(Constraint::compareTo);
+        this.sortedVariables.sort((i1, i2) ->
+                Long.compare(occurrences.get(this.variables.get(i1)),
+                             occurrences.get(this.variables.get(i2))));
     }
 
     /**
@@ -402,7 +474,7 @@ class Solver {
             }
         }
         else{
-            Variable v = variables.get(n);
+            Variable v = variables.get(sortedVariables.get(n));
             if(v.getCurrentDomain().size() == 1){
                 solveBacktracking(n+1, findAll);
                 return;
