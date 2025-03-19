@@ -130,6 +130,7 @@ class Solver {
     private final List<Variable> variables;
     private final List<int[]> foundSolutions;
     public List<Integer> currentAssignment;
+    public Set<Integer>[] domains;
 
     /**
      * Constructs a Solver using a list of variables and constraints.
@@ -142,6 +143,10 @@ class Solver {
         this.constraints = new ArrayList<>(List.of(constraints));
         this.foundSolutions = new LinkedList<>();
         this.currentAssignment = new ArrayList<>();
+        domains = new Set[variables.length];
+        for(int i = 0; i<variables.length; i++){
+            domains[i] = new HashSet<>(variables[i].domain);
+        }
     }
 
     /**
@@ -215,11 +220,28 @@ class Solver {
             }
         }
         else{
-            for(int i = 0; i < variables.get(n).domain.size(); i++){
-                currentAssignment.add(variables.get(n).domain.get(i));
+            for(Integer x: domains[n]){
+                currentAssignment.add(x);
                 solveBacktracking(n+1, findAll);
                 currentAssignment.remove(currentAssignment.size()-1);
             }
+//            for(int i = 0; i < variables.get(n).domain.size(); i++){
+//                currentAssignment.add(variables.get(n).domain.get(i));
+//                solveBacktracking(n+1, findAll);
+//                currentAssignment.remove(currentAssignment.size()-1);
+//            }
+        }
+    }
+    public void updateDomains(int n){
+        for(Constraint c: constraints){
+            if(c instanceof AllDiffConstraint){
+                AllDiffConstraint constraint = (AllDiffConstraint) c;
+                Set<Variable> vars = new HashSet<>();
+                Collections.addAll(vars, constraint.xs);
+                if(vars.contains(variables.get(n))){
+                    for(int i = 0;i<constraint.xs.length; i++){}
+                }
+
         }
     }
 
