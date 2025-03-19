@@ -26,10 +26,34 @@ class Solver {
             // Variable initialization
             this.domain = new ArrayList<>(domain);
         }
+
+        /**
+         * Removes all values in the domain that are outside the given range.
+         * Then checks if the domain is empty.
+         * [lower, upper]
+         * @param lower The lower bound of the domain (inclusive)
+         * @param upper The upper bound of the domain (inclusive)
+         * @return whether the domain is empty
+         */
+        public boolean clamp(int lower, int upper) {
+            this.domain.removeIf(x -> x < lower || x > upper);
+            return this.domain.isEmpty();
+        }
+
+        /**
+         * @return The highest value in the domain.
+         */
+        public int getUpperBound(){
+            if (this.domain.isEmpty())
+                return Integer.MIN_VALUE;
+            return this.domain.get(this.domain.size() - 1);
+        }
     }
 
     static abstract class Constraint {
         public abstract boolean isValid(List<Variable> variables, List<Integer> assignment);
+
+        public abstract boolean updateDomains(Variable variable);
     }
 
     static class NotEqConstraint extends Constraint {
@@ -60,6 +84,11 @@ class Solver {
             int index2 = variables.indexOf(x2);
             return assignment.get(index1) != assignment.get(index2) + c;
         }
+
+        @Override
+        public boolean updateDomains(Variable variable) {
+            return false;
+        }
     }
 
     static class AllDiffConstraint extends Constraint {
@@ -89,6 +118,11 @@ class Solver {
                 set.add(assignment.get(index));
             }
             return true;
+        }
+
+        @Override
+        public boolean updateDomains(Variable variable) {
+            return false;
         }
     }
 
@@ -123,6 +157,23 @@ class Solver {
                 sum += ws[i] * assignment.get(variables.indexOf(xs[i]));
             }
             return sum >= c;
+        }
+
+        @Override
+        public boolean updateDomains(Variable variable) {
+            for(int i = 0; i < xs.length; i++){
+                if(xs[i] == variable) continue;
+
+                int sum = 0;
+                for(int j = 0; j < xs.length; j++){
+                    if (j == i) continue;
+                    sum += ws[j] * xs[j].getUpperBound();
+                }
+                int upperbound = (c - sum) / ws[i];
+                if (xs[i].clamp(Integer.MIN_VALUE, upperbound))
+                    return false;
+            }
+            return true;
         }
     }
 
@@ -203,7 +254,8 @@ class Solver {
 
 
     public boolean isValid(){
-        return constraints.stream().allMatch(c -> c.isValid(variables, currentAssignment));
+        return constraints.stream().allMatch(c -> c.isValid(variables, currentAssignment))
+                && variables.stream().noneMatch(x -> x.domain.isEmpty());
     }
 
     private void solveBacktracking(int n, boolean findAll){
@@ -232,17 +284,25 @@ class Solver {
 //            }
         }
     }
-    public void updateDomains(int n){
-        for(Constraint c: constraints){
-            if(c instanceof AllDiffConstraint){
+    public boolean updateDomains(int n){
+        for(Constraint c: constraints) {
+            if (c instanceof AllDiffConstraint) {
                 AllDiffConstraint constraint = (AllDiffConstraint) c;
                 Set<Variable> vars = new HashSet<>();
                 Collections.addAll(vars, constraint.xs);
-                if(vars.contains(variables.get(n))){
-                    for(int i = 0;i<constraint.xs.length; i++){}
+                if (vars.contains(variables.get(n))) {
+                    for (int i = 0; i < constraint.xs.length; i++) {
+                    }
                 }
+            }
 
+            if (c instanceof IneqConstraint) {
+                IneqConstraint constraint = (IneqConstraint) c;
+                return constraint.updateDomains(variables.get(n));
+            }
         }
+
+        return true;
     }
 
     // You are free to add any helper methods you might want to use within
