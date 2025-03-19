@@ -31,10 +31,15 @@ class Solver {
 
         /**
          * Pushes a copy of the current domain on the stack.
+         * If this variable was already visited, do nothing.
+         *
+         * @param visited The set of already visited variables.
          */
-        public void copy(){
+        public void copy(Set<Variable> visited){
             if(this.domainStack.isEmpty()) return;
+            if(visited.contains(this)) return;
             this.domainStack.push(new TreeSet<>(this.domainStack.peek()));
+            visited.add(this);
         }
 
         /**
@@ -113,15 +118,44 @@ class Solver {
         }
     }
 
+    static class BipartiteMatching {
+        private final Map<Integer, Variable> valueMatch = new HashMap<>();
+        private Set<Integer> visited;
+
+        public boolean allDiffPossible(Set<Variable> variables) {
+            for (Variable var : variables) {
+                visited = new HashSet<>();
+                if (!matchingDFS(var)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean matchingDFS(Variable v) {
+            for (int value : v.getCurrentDomain()) {
+                if (visited.contains(value)) continue;
+                visited.add(value);
+
+                if (!valueMatch.containsKey(value) || matchingDFS(valueMatch.get(value))) {
+                    valueMatch.put(value, v);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     static abstract class Constraint {
 
         /**
          * Propagates the constraint over all the variables concerned based on the variable that was updated.
          *
          * @param variable The variable that was assigned a value.
+         * @param modified The set of variables that were modified
          * @return Whether the constraint is respected, that is no conflict occurred.
          */
-        public abstract boolean updateDomains(Variable variable);
+        public abstract boolean updateDomains(Variable variable, Set<Variable> modified);
 
         /**
          * Checks if the variables respect the constraint.
@@ -154,13 +188,15 @@ class Solver {
         }
 
         @Override
-        public boolean updateDomains(Variable variable) {
+        public boolean updateDomains(Variable variable, Set<Variable> modified) {
             int check = variable.getAssignedValue();
-            if(x1 == variable){
+            if(x1 == variable && x2.getCurrentDomain().contains(check - c)){
+                x2.copy(modified);
                 x2.getCurrentDomain().remove(check - c);
                 return x2.isDomainValid();
             }
-            else if(x2 == variable){
+            else if(x2 == variable && x1.getCurrentDomain().contains(check + c)){
+                x1.copy(modified);
                 x1.getCurrentDomain().remove(check + c);
                 return x1.isDomainValid();
             }
@@ -189,14 +225,18 @@ class Solver {
         }
 
         @Override
-        public boolean updateDomains(Variable variable) {
+        public boolean updateDomains(Variable variable, Set<Variable> modified) {
             Integer x = variable.getAssignedValue();
 
             if(!xs.contains(variable))
                 return true;
 
+            if(!(new BipartiteMatching().allDiffPossible(xs)))
+                return false;
+
             for (Variable v: xs) {
-                if (v != variable){
+                if (v != variable && v.getCurrentDomain().contains(x)){
+                    v.copy(modified);
                     v.getCurrentDomain().remove(x);
                     if(!v.isDomainValid())
                         return false;
@@ -238,7 +278,7 @@ class Solver {
         }
 
         @Override
-        public boolean updateDomains(Variable variable) {
+        public boolean updateDomains(Variable variable, Set<Variable> modified) {
             for(int i = 0; i < amount; i++){
                 if(xs[i] == variable) continue;
                 if(ws[i] == 0) continue;
@@ -251,13 +291,21 @@ class Solver {
 
                 if (ws[i] >= 0){
                     int lowerBound = Math.ceilDiv(c - maxSum, ws[i]);
-                    if (xs[i].clamp(lowerBound, Integer.MAX_VALUE))
-                        return false;
+
+                    if(xs[i].getLowerBound() < lowerBound){
+                        xs[i].copy(modified);
+                        if (xs[i].clamp(lowerBound, Integer.MAX_VALUE))
+                            return false;
+                    }
                 }
                 else{
                     int upperBound = Math.floorDiv(c - maxSum, ws[i]);
-                    if (xs[i].clamp(Integer.MIN_VALUE, upperBound))
-                        return false;
+
+                    if(xs[i].getUpperBound() > upperBound){
+                        xs[i].copy(modified);
+                        if (xs[i].clamp(Integer.MIN_VALUE, upperBound))
+                            return false;
+                    }
                 }
             }
             return true;
@@ -360,25 +408,22 @@ class Solver {
                 return;
             }
 
-            List<Integer> elementsToIterate = new ArrayList<>(v.getCurrentDomain());
-            for (int x : elementsToIterate) {
+            for (int x : v.getCurrentDomain()) {
                 v.assign(x);
-                for(Variable variable : variables){
-                    if(variable != v)
-                        variable.copy();
-                }
+                Set<Variable> modified = new HashSet<>(variables.size());
 
-                if (updateDomains(v))
+                if (updateDomains(v, modified))
                     solveBacktracking(n+1, findAll);
 
-                variables.forEach(Variable::pop);
+                modified.forEach(Variable::pop);
+                v.pop();
             }
         }
     }
 
-    public boolean updateDomains(Variable variable){
+    public boolean updateDomains(Variable variable, Set<Variable> modified){
         for(Constraint c: constraints) {
-            if (!c.updateDomains(variable))
+            if (!c.updateDomains(variable, modified))
                 return false;
         }
         return true;
