@@ -401,8 +401,8 @@ class Solver {
         }
         this.constraints.sort(Constraint::compareTo);
         this.sortedVariables.sort((i1, i2) ->
-                Long.compare(occurrences.get(this.variables.get(i1)),
-                             occurrences.get(this.variables.get(i2))));
+                Long.compare(occurrences.get(this.variables.get(i2)),
+                             occurrences.get(this.variables.get(i1))));
     }
 
     /**
