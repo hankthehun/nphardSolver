@@ -29,28 +29,56 @@ class Solver {
             this.domainStack.push(new TreeSet<>(domain));
         }
 
+        /**
+         * Pushes a copy of the current domain on the stack.
+         */
         public void copy(){
             if(this.domainStack.isEmpty()) return;
             this.domainStack.push(new TreeSet<>(this.domainStack.peek()));
         }
 
+        /**
+         * Pushes a new domain on the stack, containing only the given value.
+         *
+         * @param value The value assigned to this variable.
+         */
         public void assign(int value) {
             domainStack.push(new TreeSet<>(List.of(value)));
         }
 
+        /**
+         * Pops the domain on top of the stack.
+         */
         public void pop(){
             this.domainStack.pop();
         }
+
+        /**
+         * Getter for the current domain, obtained by peeking in the stack.
+         *
+         * @return The current domain of the variable.
+         */
         public TreeSet<Integer> getCurrentDomain(){
             return this.domainStack.peek();
         }
 
+        /**
+         * Checks if the domain is not empty.
+         *
+         * @return Whether the domain is valid, that is if it contains at least one value.
+         */
         public boolean isDomainValid(){
             return !this.domainStack.isEmpty();
         }
 
+        /**
+         * Getter for the first value in the domain.
+         * This function does not check if the domain contains multiple values.
+         *
+         * @return A fixed value for this variable.
+         */
         public int getAssignedValue(){
-            return this.getCurrentDomain().first();
+            return this.getLowerBound();
         }
 
         /**
@@ -74,12 +102,33 @@ class Solver {
                 return Integer.MIN_VALUE;
             return this.getCurrentDomain().last();
         }
+
+        /**
+         * @return The lowest value in the domain.
+         */
+        public int getLowerBound(){
+            if (this.getCurrentDomain().isEmpty())
+                return Integer.MAX_VALUE;
+            return this.getCurrentDomain().first();
+        }
     }
 
     static abstract class Constraint {
 
+        /**
+         * Propagates the constraint over all the variables concerned based on the variable that was updated.
+         *
+         * @param variable The variable that was assigned a value.
+         * @return Whether the constraint is respected, that is no conflict occurred.
+         */
         public abstract boolean updateDomains(Variable variable);
 
+        /**
+         * Checks if the variables respect the constraint.
+         * This function assumes all variables have an assigned value.
+         *
+         * @return Whether the constraint is respected or not.
+         */
         public abstract boolean isRespected();
     }
 
@@ -125,7 +174,7 @@ class Solver {
     }
 
     static class AllDiffConstraint extends Constraint {
-        private final Variable[] xs;
+        private final Set<Variable> xs;
 
         /**
          * Constructs an AllDiffConstraint:
@@ -136,18 +185,17 @@ class Solver {
          * @param xs An array of a variables that should be different.
          */
         public AllDiffConstraint(Variable[] xs) {
-            this.xs = xs;
+            this.xs = new HashSet<>(Arrays.asList(xs));
         }
 
         @Override
         public boolean updateDomains(Variable variable) {
-            Set<Variable> vars = new HashSet<>();
-            Collections.addAll(vars, xs);
             Integer x = variable.getAssignedValue();
 
-            if(!vars.contains(variable))
+            if(!xs.contains(variable))
                 return true;
-            for (Variable v: vars) {
+
+            for (Variable v: xs) {
                 if (v != variable){
                     v.getCurrentDomain().remove(x);
                     if(!v.isDomainValid())
@@ -159,18 +207,18 @@ class Solver {
 
         @Override
         public boolean isRespected() {
-            return Arrays.stream(xs)
+            return xs.stream()
                     .map(Variable::getAssignedValue)
                     .collect(Collectors.toSet())
-                    .size() == xs.length;
+                    .size() == xs.size();
         }
     }
 
     static class IneqConstraint extends Constraint {
-        private final Variable[] xs;
         private final int[] ws;
-        private final int c;
+        private final Variable[] xs;
         private final int amount;
+        private final int c;
 
         /**
          * Constructs an IneqConstraint:
@@ -183,11 +231,10 @@ class Solver {
          * @param c An integer constant.
          */
         public IneqConstraint(Variable[] xs, int[] ws, int c) {
-            // Variable initialization
-            this.xs = xs;
-            this.ws = ws;
             this.c = c;
             this.amount = Math.min(xs.length, ws.length);
+            this.xs = xs;
+            this.ws = ws;
         }
 
         @Override
@@ -196,19 +243,19 @@ class Solver {
                 if(xs[i] == variable) continue;
                 if(ws[i] == 0) continue;
 
-                int sum = 0;
+                int maxSum = 0;
                 for(int j = 0; j < amount; j++){
                     if (j == i) continue;
-                    sum += ws[j] * xs[j].getUpperBound();
+                    maxSum += ws[j] >= 0 ? ws[j] * xs[j].getUpperBound() : ws[j] * xs[j].getLowerBound();
                 }
 
                 if (ws[i] >= 0){
-                    int lowerBound = Math.ceilDiv(c - sum, ws[i]);
+                    int lowerBound = Math.ceilDiv(c - maxSum, ws[i]);
                     if (xs[i].clamp(lowerBound, Integer.MAX_VALUE))
                         return false;
                 }
                 else{
-                    int upperBound = Math.floorDiv(c - sum, ws[i]);
+                    int upperBound = Math.floorDiv(c - maxSum, ws[i]);
                     if (xs[i].clamp(Integer.MIN_VALUE, upperBound))
                         return false;
                 }
