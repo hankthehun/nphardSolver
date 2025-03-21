@@ -73,7 +73,7 @@ class Solver {
          * @return Whether the domain is valid, that is if it contains at least one value.
          */
         public boolean isDomainValid(){
-            return !this.domainStack.isEmpty();
+            return !this.getCurrentDomain().isEmpty();
         }
 
         /**
