@@ -73,17 +73,22 @@ class Solver {
          * @return Whether the domain is valid, that is if it contains at least one value.
          */
         public boolean isDomainValid(){
-            return !this.domainStack.isEmpty();
+            return !this.getCurrentDomain().isEmpty();
         }
 
         /**
-         * Getter for the first value in the domain.
-         * This function does not check if the domain contains multiple values.
+         * Return the best match for an inequality.
+         * Positive Weight -> upper bound
+         * Negative Weight -> lower bound
+         * Zero weight -> zero
          *
-         * @return A fixed value for this variable.
+         * @param weight the weight associated to this variable in the inequality.
+         * @return The best fit of the domain.
          */
-        public int getAssignedValue(){
-            return this.getLowerBound();
+        public int getBestForInequality(int weight){
+            if(weight == 0) return 0;
+            else if (weight > 0) return getUpperBound();
+            else return getLowerBound();
         }
 
         /**
@@ -95,8 +100,8 @@ class Solver {
          * @return whether the domain is empty
          */
         public boolean clamp(int lower, int upper) {
-            this.getCurrentDomain().removeIf(x -> x < lower || x > upper);
-            return this.getCurrentDomain().isEmpty();
+            return this.getCurrentDomain().removeIf(x -> x < lower || x > upper)
+                && this.getCurrentDomain().isEmpty();
         }
 
         /**
@@ -104,7 +109,7 @@ class Solver {
          */
         public int getUpperBound(){
             if (this.getCurrentDomain().isEmpty())
-                return Integer.MIN_VALUE;
+                throw new IllegalStateException("Domain is empty");
             return this.getCurrentDomain().last();
         }
 
@@ -113,7 +118,7 @@ class Solver {
          */
         public int getLowerBound(){
             if (this.getCurrentDomain().isEmpty())
-                return Integer.MAX_VALUE;
+                throw new IllegalStateException("Domain is empty");
             return this.getCurrentDomain().first();
         }
     }
@@ -216,23 +221,24 @@ class Solver {
 
         @Override
         public boolean updateDomains(Variable variable, Set<Variable> modified) {
-            int check = variable.getAssignedValue();
-            if(x1 == variable && x2.getCurrentDomain().contains(check - c)){
-                x2.copy(modified);
-                x2.getCurrentDomain().remove(check - c);
-                return x2.isDomainValid();
-            }
-            else if(x2 == variable && x1.getCurrentDomain().contains(check + c)){
-                x1.copy(modified);
-                x1.getCurrentDomain().remove(check + c);
-                return x1.isDomainValid();
+            int value = variable.getLowerBound();
+            Variable other = variable == x1 ? x2 : x1;
+            int forbiddenValue = variable == x1 ? value - c : value + c;
+            if(other.getCurrentDomain().contains(forbiddenValue)){
+                other.copy(modified);
+                other.getCurrentDomain().remove(forbiddenValue);
+                return other.isDomainValid();
             }
             return true;
         }
 
         @Override
         public boolean isRespected() {
-            return x1.getAssignedValue() != x2.getAssignedValue() + c;
+            return x2.getCurrentDomain().size() > 1
+                    || x1.getCurrentDomain().size() > 1
+                    || x1.getCurrentDomain()
+                        .stream()
+                        .anyMatch(i -> (!x2.getCurrentDomain().contains(i - c)));
         }
 
         @Override
@@ -263,7 +269,7 @@ class Solver {
 
         @Override
         public boolean updateDomains(Variable variable, Set<Variable> modified) {
-            Integer x = variable.getAssignedValue();
+            Integer x = variable.getLowerBound();
 
             if(!xs.contains(variable))
                 return true;
@@ -284,10 +290,7 @@ class Solver {
 
         @Override
         public boolean isRespected() {
-            return xs.stream()
-                    .map(Variable::getAssignedValue)
-                    .collect(Collectors.toSet())
-                    .size() == xs.size();
+            return (new BipartiteMatching().allDiffPossible(xs));
         }
 
         @Override
@@ -360,7 +363,7 @@ class Solver {
 
         @Override
         public boolean isRespected() {
-            return IntStream.range(0, amount).map(i -> ws[i] * xs[i].getAssignedValue()).sum() >= c;
+            return IntStream.range(0, amount).map(i -> ws[i] * xs[i].getBestForInequality(ws[i])).sum() >= c;
         }
 
         @Override
@@ -456,8 +459,7 @@ class Solver {
     }
 
     public boolean isValid(){
-        return variables.stream().allMatch(Variable::isDomainValid) &&
-                constraints.stream().allMatch(Constraint::isRespected);
+        return constraints.stream().allMatch(Constraint::isRespected);
     }
 
     private void solveBacktracking(int n, boolean findAll){
@@ -498,6 +500,6 @@ class Solver {
             if (!c.updateDomains(variable, modified))
                 return false;
         }
-        return true;
+        return isValid();
     }
 }
